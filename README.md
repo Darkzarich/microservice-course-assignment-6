@@ -115,7 +115,7 @@ In Terminal 1, run the following SQL:
 
 ```sql
 BEGIN;
--- Will return 0 because no rows 
+-- Will return 0 because no rows
 SELECT COUNT(*) FROM transaction_logs WHERE account_id = 1;
 ```
 
@@ -150,3 +150,34 @@ SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 
 Now the last `SELECT` still returns `1` even though the `INSERT` was committed.
 
+It's important to note that `SERIALIZABLE` isolation level **doesn't merely lock the specific rows you modify it also tracks the reads your transaction performs to detect logical dependencies**.
+
+This allows it to catch "write skew"—a scenario where two concurrent transactions read a consistent state (e.g., verifying that the total balance across two accounts is sufficient) and then make diverging changes to different rows based on that shared information.
+
+Even though the updated rows (Max and Helen) are distinct, PostgreSQL detects that the combined outcome violates the integrity constraint implied by the initial reads, forcing one transaction to fail to ensure data consistency.
+
+```sql
+-- Terminal 1
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SELECT sum(balance) FROM accounts WHERE name IN ('Max', 'Helen');
+UPDATE accounts SET balance = 400 WHERE name = 'Max';
+-- change to Terminal 2
+COMMIT;
+
+-- Terminal 2
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+SELECT sum(balance) FROM accounts WHERE name IN ('Max', 'Helen');
+UPDATE accounts SET balance = 400 WHERE name = 'Helen';
+COMMIT;
+-- change to Terminal 1
+```
+
+Terminal 1 will fail with the following error:
+
+```
+ERROR:  could not serialize access due to read/write dependencies among transactions
+```
+
+If the used isolation level was `REPEATABLE READ` instead of `SERIALIZABLE` the **transaction would have succeeded** which may have not been what you wanted.
