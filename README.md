@@ -27,9 +27,12 @@ docker compose exec -it postgres psql -U admin -d testdb
 docker compose exec -it postgres psql -U admin -d testdb
 ```
 
+The database will have some prepared tables and data.
 From this point on, "steps" are to be executed in each terminal.
 
 ## Steps
+
+Detailed step-by-step descriptions how different read phenomena occur and how different isolation levels affect them.
 
 ### Dirty Reads
 
@@ -43,7 +46,6 @@ In Terminal 1, run the following SQL:
 
 ```sql
 BEGIN;
-
 SELECT * FROM accounts WHERE name = 'Helen';
 ```
 
@@ -51,9 +53,7 @@ Switch to Terminal 2 and run the following SQL:
 
 ```sql
 BEGIN;
-
 UPDATE accounts SET balance = balance - 100 WHERE name = 'Helen';
-
 COMMIT;
 ```
 
@@ -61,7 +61,6 @@ Switch to Terminal 1 and run the following SQL:
 
 ```sql
 SELECT * FROM accounts WHERE name = 'Helen';
-
 COMMIT;
 ```
 
@@ -69,7 +68,7 @@ Second `SELECT` in Terminal 1 returned `900` which means **the data changed mid-
 
 By default PostgreSQL uses `READ COMMITTED` isolation level which does not prevent **non-repeatable reads**.
 
-What also can be noticed that if two transactions update the same row the second transaction will have to wait for the first transaction to finish and then it will read the updated data.
+What also can be noticed that if two transactions update the same row the second transaction will have to wait for the first transaction to finish and then it will read the updated data if it was updated or the original data if it was not.
 
 #### Preventing Non-Repeatable Reads
 
@@ -109,4 +108,45 @@ In Terminal 2:
 ```
 ERROR:  could not serialize access due to concurrent update
 ```
+
+### Phantom Reads
+
+In Terminal 1, run the following SQL:
+
+```sql
+BEGIN;
+-- Will return 0 because no rows 
+SELECT COUNT(*) FROM transaction_logs WHERE account_id = 1;
+```
+
+In Terminal 2, run the following SQL:
+
+```sql
+BEGIN;
+INSERT INTO transaction_logs (account_id, description, amount)
+VALUES (1, 'Transfer fee', 5);
+COMMIT;
+```
+
+In Terminal 1:
+
+```sql
+SELECT COUNT(*) FROM transaction_logs WHERE account_id = 1;
+COMMIT;
+```
+
+The last `SELECT` in Terminal 1 returned `1` which means **the row appeared out of nowhere mid-transaction**.
+
+#### Preventing Phantom Reads
+
+`SERIALIZABLE` isolation level prevents phantom reads.
+
+Repeat previous steps but use `SERIALIZABLE` isolation level.
+
+```sql
+BEGIN;
+SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+```
+
+Now the last `SELECT` still returns `1` even though the `INSERT` was committed.
 
